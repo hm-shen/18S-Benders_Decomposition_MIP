@@ -85,6 +85,9 @@ class Benders_Decomposition(object):
         self.stats = {}         # store computational statistics
         self._init_benders_records()
 
+        # init submodel
+        self.submodel = None
+
         # load data and build model
         if indata is not None:
             self._load_data(indata)
@@ -360,8 +363,12 @@ class Benders_Decomposition(object):
         logging.debug('Start solving sub problem ...')
         # construct subproblem for each scenario
         self._prepare_sub_data(sid)
-        self.submodel = Benders_Subproblem(self.subdata)
-        self.submodel.optimize()
+        if self.submodel is None:
+            self.submodel = Benders_Subproblem(self.subdata)
+            self.submodel.optimize()
+        else:
+            self.submodel.update_model(self.subdata)
+            self.submodel.reoptimize()
         self.stats['s_optval'][iternum].append(
             self.submodel.results['s_optval'])
 

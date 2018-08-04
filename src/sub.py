@@ -38,6 +38,24 @@ class Benders_Subproblem(object):
 
         logging.debug("Sub problem has been initialized.")
 
+    def update_model(self, subdata):
+
+        # only update the objective function (by default)
+
+        self.data = subdata
+        new_objcoeffs = self.data['h_s'] - self.data['T'].dot(self.data['x'])
+
+        logging.debug('new objective coeffs are:\n%s' % str(new_objcoeffs))
+
+        self.model.setObjective(
+            gb.quicksum(self.variables['pi'][ind] * float(new_objcoeffs[ind])
+                        for ind in range(self.data['sub_dual_dim'])),
+            gb.GRB.MAXIMIZE)
+
+        self.model.update()
+
+        logging.debug('Objective function has been constructed.')
+
     def optimize(self):
 
         logging.debug("Start optimizing sub problem ...")
@@ -47,6 +65,11 @@ class Benders_Subproblem(object):
         self._save_records()
 
         logging.debug("Optimization is complete ...")
+
+    def reoptimize(self):
+
+        self.model.optimize()
+        self._save_records()
 
     def _save_records(self):
 
