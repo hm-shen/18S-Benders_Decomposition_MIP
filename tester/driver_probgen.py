@@ -10,7 +10,7 @@ import logging
 import argparse
 import numpy as np
 import scipy.io as sio
-from src.prob_gen.probgen import Two_Stage_Generator
+from tester.probgen import Two_Stage_Generator
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 
