@@ -60,8 +60,9 @@ def main(args):
     optval, ttime, rst = run_bd(probdata)
 
     logging.info('Total time is {}'.format(ttime))
-    logging.info('Result is {}'.format(
-        check_answer(probdata['ans'], optval)))
+    if probdata.get('ans', None) is not None:
+        logging.info('Result is {}'.format(
+            check_answer(probdata['ans'], optval)))
 
 if __name__ == '__main__':
 

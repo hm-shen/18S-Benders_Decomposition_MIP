@@ -6,7 +6,8 @@ Date        : 02/13/2018
 
 This class handles classes of problems with the following form:
 min  c^\top x + \sum_{i=1}^S p_i \theta_i
-s.t. f_i(x) \leq 0, i = 1,2,\ldots,m
+s.t. Ax \leq b
+     f_i(x) \leq 0, i = 1,2,\ldots,m
      x \succeq 0, \theta \succeq 0,
      x \in Z
 
@@ -64,7 +65,7 @@ class Benders_Decomposition(object):
 
     '''
 
-    def __init__(self, indata, opt_gap=0.1, tol_gap=1e-4, max_iters=10000):
+    def __init__(self, indata, opt_gap=0.01, tol_gap=1e-4, max_iters=10000):
 
         logging.debug("Initializing Benders Decomposition ...")
 
@@ -147,6 +148,8 @@ class Benders_Decomposition(object):
         # self.data = copy.deepcopy(input_data)
         self.data['c'] = input_data['c']
         self.data['p'] = input_data['p'].flatten()
+        self.data['A'] = input_data.get('A', None)
+        self.data['b'] = input_data.get('b', None)
         # read input data -- sub
         self.data['W'] = input_data['W']
         self.data['T'] = input_data['T']
@@ -254,6 +257,16 @@ class Benders_Decomposition(object):
         # add init constraints
         m = self.model
 
+        self.constraints['master'] = []
+        # add master constraints if A, b exists
+        if (self.data['A'] is not None) and (self.data['b'] is not None):
+            for cid in range(self.data['A'].shape[0]):
+                self.constraints['master'].append(m.addConstr(
+                    gb.quicksum(self.variables['x'][ind] * self.data['A'][cid, ind]
+                                for ind in range(self.data['master_dim'])),
+                    gb.GRB.LESS_EQUAL, float(self.data['b'][cid])))
+        m.update()
+
         # init cuts
         self.constraints['cuts'] = {}
         for ind in range(self.data['num_scenarios']):
@@ -277,7 +290,7 @@ class Benders_Decomposition(object):
         # while not done.
         while notDone and (iternum < self.maxiters):
 
-            logging.debug("Loop {} starts ...".format(iternum))
+            logging.info("Loop {} starts ...".format(iternum))
 
             # initializing statistical vars
             self.stats['s_optval'][iternum] = []
@@ -285,10 +298,10 @@ class Benders_Decomposition(object):
             self.stats['cuts_status'][iternum] = [0] * self.data['num_scenarios']
 
             # reset flag
-            allPass = True
+            # allPass = True
             self.model.update()
             self.model.optimize()
-            logging.debug('Current primal optimal sol is: %.4f' % self.model.objval)
+            logging.info('Current primal optimal sol is: %.4f' % self.model.objval)
             self._save_results(iternum)
 
             # debug
@@ -325,7 +338,7 @@ class Benders_Decomposition(object):
                           self.model.numConstrs)
             iternum += 1
             notDone = not allPass
-            if optgap < self.opt_gap:
+            if (optgap >= 0) and (optgap < self.opt_gap):
                 notDone = False
 
         ed = time.time()
@@ -363,14 +376,21 @@ class Benders_Decomposition(object):
         logging.debug('Start solving sub problem ...')
         # construct subproblem for each scenario
         self._prepare_sub_data(sid)
+
         if self.submodel is None:
             self.submodel = Benders_Subproblem(self.subdata)
             self.submodel.optimize()
         else:
             self.submodel.update_model(self.subdata)
             self.submodel.reoptimize()
-        self.stats['s_optval'][iternum].append(
-            self.submodel.results['s_optval'])
+
+        if self.submodel.results['status'] == gb.GRB.Status.OPTIMAL:
+            self.stats['s_optval'][iternum].append(
+                self.submodel.results['s_optval'])
+        elif self.submodel.results['status'] == gb.GRB.Status.INFEASIBLE:
+            self.stats['s_optval'][iternum].append(-np.inf)
+        elif self.submodel.results['status'] == gb.GRB.Status.UNBOUNDED:
+            self.stats['s_optval'][iternum].append(np.inf)
 
         logging.debug('Sub problem is solved.')
 
@@ -418,7 +438,7 @@ class Benders_Decomposition(object):
         elif substatus == gb.GRB.Status.INFEASIBLE:
 
             # sub problem is infeasible, we need to add a feasibility cut
-            print "sub problem is infeasible, we need to add a feasibility cut."
+            logging.info("sub problem is infeasible, we need to add a feasibility cut.")
             unbdray = np.array(self.submodel.results['unbdray'])
             h_s = self.data['H'][:,sid][:,np.newaxis]
             rhs = unbdray.dot(h_s)
