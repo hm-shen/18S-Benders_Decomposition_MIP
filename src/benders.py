@@ -65,7 +65,7 @@ class Benders_Decomposition(object):
 
     '''
 
-    def __init__(self, indata, opt_gap=0.01, tol_gap=1e-4, max_iters=10000):
+    def __init__(self, indata, opt_gap=0.1, tol_gap=1e-4, max_iters=10000):
 
         logging.debug("Initializing Benders Decomposition ...")
 
@@ -127,6 +127,8 @@ class Benders_Decomposition(object):
         self.stats['status'] = []
         self.stats['s_optval'] = {}
         self.stats['total_time'] = None
+        self.stats['n_feas_cuts'] = 0
+        self.stats['n_opt_cuts'] = 0
 
         # denotes whether a cut is active or not
         self.stats['cuts_status'] = {}
@@ -210,6 +212,7 @@ class Benders_Decomposition(object):
 
         self.model = gb.Model()
         self.model.setParam(gb.GRB.Param.OutputFlag, 0)
+        self.model.setParam(gb.GRB.Param.Presolve, 0)
         self._build_variables()
         self._build_objective()
         self._build_constraints()
@@ -223,7 +226,7 @@ class Benders_Decomposition(object):
 
         m = self.model
         # build x
-        x_ls = [m.addVar(lb=0, vtype=gb.GRB.INTEGER, name='x%d' % ind)
+        x_ls = [m.addVar(lb=0, vtype=gb.GRB.BINARY, name='x%d' % ind)
                 for ind in range(self.data['master_dim'])]
         self.variables['x'] = dict(zip(range(len(x_ls)), x_ls))
 
@@ -301,7 +304,13 @@ class Benders_Decomposition(object):
             # allPass = True
             self.model.update()
             self.model.optimize()
-            logging.info('Current primal optimal sol is: %.4f' % self.model.objval)
+
+            if self.model.status == gb.GRB.Status.OPTIMAL:
+                logging.info('Optimal objective: %g' % self.model.objVal)
+            elif self.model.status != gb.GRB.Status.INFEASIBLE:
+                logging.info('Optimization was stopped with status %d' % self.model.status)
+                exit(-1)
+            # logging.info('Current primal optimal sol is: %.4f' % self.model.objVal)
             self._save_results(iternum)
 
             # debug
@@ -334,12 +343,21 @@ class Benders_Decomposition(object):
 
             ed1 = time.time()
             logging.info('time to process: %.3f' % (ed1 - st1))
-            logging.info('Total number of cuts in model is:%d' %
-                          self.model.numConstrs)
+            logging.info('Total number of optimality cuts in model is:%d' %
+                          self.stats['n_opt_cuts'])
+            logging.info('Total number of feasibility cuts in model is:%d' %
+                          self.stats['n_feas_cuts'])
+            logging.info('Total number of constraints is model is: {}'
+                         .format(self.model.NumConstrs))
+            logging.info('current optgap is {}'.format(optgap))
+
             iternum += 1
             notDone = not allPass
+
             if (optgap >= 0) and (optgap < self.opt_gap):
                 notDone = False
+            else:
+                notDone = True
 
         ed = time.time()
         self.stats['total_time'] = ed - st
@@ -399,7 +417,7 @@ class Benders_Decomposition(object):
         logging.debug("Getting benders cut for scenario %d" % sid)
 
         if substatus == gb.GRB.Status.OPTIMAL:
-            logging.debug("sub problem has an optimal solution.")
+            logging.debug("sub problem {} has an optimal solution.".format(sid))
             pi = self.submodel.results['s_optsol']
             Q_i = self.submodel.results['s_optval']
             theta_i = self.stats['m_opt_theta'][-1][sid]
@@ -419,7 +437,9 @@ class Benders_Decomposition(object):
 
             if (Q_i - self.tol_gap > theta_i):
 
+                self.stats['n_opt_cuts'] += 1
                 # cut is active at this sid
+                logging.debug("sub problem {} generates an optimality cut".format(sid))
                 self.stats['cuts'][iternum][sid]['status'].append(False)
                 # self.stats['cuts'][iternum][sid]['selection'] = True
                 self.stats['cuts_status'][iternum][sid] = self.STATUS['NOT_OPTIMAL']
@@ -438,7 +458,8 @@ class Benders_Decomposition(object):
         elif substatus == gb.GRB.Status.INFEASIBLE:
 
             # sub problem is infeasible, we need to add a feasibility cut
-            logging.info("sub problem is infeasible, we need to add a feasibility cut.")
+            logging.debug("sub problem {} is infeasible, we need to add a feasibility cut.".format(sid))
+            self.stats['n_feas_cuts'] += 1
             unbdray = np.array(self.submodel.results['unbdray'])
             h_s = self.data['H'][:,sid][:,np.newaxis]
             rhs = unbdray.dot(h_s)
@@ -458,7 +479,7 @@ class Benders_Decomposition(object):
 
         elif substatus == gb.GRB.Status.UNBOUNDED:
 
-            logging.debug("The original problem is unbounded")
+            logging.info("The original problem is unbounded")
             self.stats['cuts'][iternum][sid]['status'] = ['unbounded', True]
 
             return True
@@ -631,6 +652,8 @@ class Benders_Decomposition(object):
         self.results['total_time'] = self.stats['total_time']
         self.results['total_cuts'] = self.model.numConstrs
         self.results['total_iters'] = len(self.stats['m_optval'])
+        self.results['n_opt_cuts'] = self.stats['n_opt_cuts']
+        self.results['n_feas_cuts'] = self.stats['n_feas_cuts']
 
         if self.stats['status'][-1] == 2:
             self.results['status'] = 'Optimal'
@@ -652,6 +675,8 @@ class Benders_Decomposition(object):
         print '\nOptimization Results:'
         print '{0:20}{1:<10}'.format('Solving Status:', self.results['status'])
         print '{0:20}{1:<.4f}'.format('Optimal Sol.:', self.results['m_optval'])
+        print '{0:20}{1:<.4f}'.format('Num Optimal Cuts:', self.results['n_opt_cuts'])
+        print '{0:20}{1:<.4f}'.format('Num Feasib Cuts:', self.results['n_feas_cuts'])
         print '{0:20}{1:<.4f}'.format('Lower Bound:', self.results['lower_bd'])
         print '{0:20}{1:<.4f}'.format('Upper bound:', self.results['upper_bd'])
         print '{0:20}{1:<10}'.format('Total Cuts:', self.results['total_cuts'])
