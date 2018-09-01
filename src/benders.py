@@ -516,17 +516,12 @@ class Benders_Decomposition(object):
         logging.debug('Updating bounds ...')
 
         # update lower bounds
-        lowbnds = self.stats['m_optval'][-1]
-        self.stats['lower_bounds'].append(lowbnds)
+        lowbnds = self._update_lbds(iternum)
 
         # update upper bounds
         if len(self.stats['s_optval'][iternum]) == self.data['num_scenarios']:
 
-            upbnds = self.data['c'].transpose().\
-                     dot(self.stats['m_opt_x'][-1]).flatten() +\
-                     np.array(self.stats['s_optval'][iternum]).dot(self.data['p'])
-
-            self.stats['upper_bounds'].append(float(upbnds))
+            upbnds = self._update_ubds(iternum)
             return (upbnds - lowbnds) / (lowbnds + 1)
 
         else:
@@ -534,6 +529,23 @@ class Benders_Decomposition(object):
             upbnds = np.inf
             self.stats['upper_bounds'].append(float(upbnds))
             return np.inf
+
+    def _update_lbds(self, iternum):
+
+        lowbnds = self.stats['m_optval'][-1]
+        self.stats['lower_bounds'].append(lowbnds)
+
+        return lowbnds
+
+    def _update_ubds(self, iternum):
+
+        upbnds = self.data['c'].transpose().\
+                 dot(self.stats['m_opt_x'][-1]).flatten() +\
+                 np.array(self.stats['s_optval'][iternum]).dot(self.data['p'])
+
+        self.stats['upper_bounds'].append(float(upbnds))
+
+        return upbnds
 
     def _add_cuts(self, iternum):
 
