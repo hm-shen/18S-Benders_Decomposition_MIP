@@ -37,6 +37,7 @@ import time
 import copy
 import logging
 import numpy as np
+import timeout_decorator
 from sub import Benders_Subproblem
 
 
@@ -212,7 +213,7 @@ class Benders_Decomposition(object):
 
         self.model = gb.Model()
         self.model.setParam(gb.GRB.Param.OutputFlag, 0)
-        self.model.setParam(gb.GRB.Param.Presolve, 0)
+        # self.model.setParam(gb.GRB.Param.Presolve, 0)
         self._build_variables()
         self._build_objective()
         self._build_constraints()
@@ -302,29 +303,7 @@ class Benders_Decomposition(object):
 
             # reset flag
             # allPass = True
-            self.model.update()
-            self.model.optimize()
-
-            if self.model.status == gb.GRB.Status.OPTIMAL:
-                logging.info('Optimal objective: %g' % self.model.objVal)
-            elif self.model.status != gb.GRB.Status.INFEASIBLE:
-                logging.info('Optimization was stopped with status %d' % self.model.status)
-                exit(-1)
-            # logging.info('Current primal optimal sol is: %.4f' % self.model.objVal)
-            self._save_results(iternum)
-
-            # debug
-            logging.info("optval at {}th loop is {}"\
-                         .format(iternum, self.stats['m_optval'][-1]))
-
-            # if master is infeasible, so is the original problem
-            if self.stats['status'][0] == gb.GRB.Status.INFEASIBLE:
-                logging.error("Infeasible problem!")
-                return np.nan
-
-            if self.stats['status'][0] == gb.GRB.Status.UNBOUNDED:
-                logging.error("Master is unbounded! Check whether c,p \succeq 0?")
-                return np.nan
+            self._solve_MP(iternum)
 
             st1 = time.time()
             # pre-select using cut selection strategy
@@ -373,6 +352,37 @@ class Benders_Decomposition(object):
         # init dict for storing cuts info
         for sid in range(self.data['num_scenarios']):
             self.stats['cuts'][iternum][sid] = {}
+
+    @timeout_decorator.timeout(600)
+    def _solve_MP(self, iternum):
+
+        ''' if solve MP for a single loop takes more than 10 mins, we stop. '''
+
+        self.model.optimize()
+
+        if self.model.status == gb.GRB.Status.OPTIMAL:
+            logging.info('Optimal objective: %g' % self.model.objVal)
+        elif self.model.status != gb.GRB.Status.INFEASIBLE:
+            logging.info('Optimization was stopped with status %d' % self.model.status)
+            exit(-1)
+
+        # logging.info('Current primal optimal sol is: %.4f' % self.model.objVal)
+        self._save_results(iternum)
+
+        # debug
+        logging.info("optval at {}th loop is {}"\
+                     .format(iternum, self.stats['m_optval'][-1]))
+
+
+        # if master is infeasible, so is the original problem
+        if self.stats['status'][0] == gb.GRB.Status.INFEASIBLE:
+            logging.error("Infeasible problem!")
+            return np.nan
+
+        if self.stats['status'][0] == gb.GRB.Status.UNBOUNDED:
+            logging.error("Master is unbounded! Check whether c,p \succeq 0?")
+            return np.nan
+
 
     def _check_subproblems(self, iternum):
 
@@ -517,11 +527,14 @@ class Benders_Decomposition(object):
 
         # update lower bounds
         lowbnds = self._update_lbds(iternum)
+        print 'Lower bound is {}'.format(lowbnds)
 
         # update upper bounds
         if len(self.stats['s_optval'][iternum]) == self.data['num_scenarios']:
 
             upbnds = self._update_ubds(iternum)
+            print 'Upper bound is {}'.format(upbnds)
+
             return (upbnds - lowbnds) / (lowbnds + 1)
 
         else:
@@ -545,7 +558,7 @@ class Benders_Decomposition(object):
 
         self.stats['upper_bounds'].append(float(upbnds))
 
-        return upbnds
+        return float(upbnds)
 
     def _add_cuts(self, iternum):
 
