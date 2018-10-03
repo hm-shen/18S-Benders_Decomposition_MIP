@@ -52,107 +52,6 @@ class Two_Stage_Generator(object):
 
         return prob_data
 
-    def _dec2bin(self, dec, length):
-
-        bin_str = bin(dec)
-        bin_out = np.zeros((length))
-        bin_raw = np.fromiter(bin_str[2:], int)
-        bin_out[-bin_raw.shape[0]:] = bin_raw
-        return bin_out
-
-    def _dec2binlist(self, lsOfDec, length):
-
-        # print 'lsOfDec is:', lsOfDec.shape[0]
-
-        lsOfBin = np.empty([lsOfDec.shape[0], length])
-        cnt = 0
-        for dec in lsOfDec:
-            lsOfBin[cnt, :] = self._dec2bin(dec, length)
-            # print self._dec2bin(dec, length)
-            cnt += 1
-
-        return lsOfBin
-
-    def _gen(self, seed=None):
-
-        '''
-        Description: Generate complete two-stage benders problems
-        '''
-
-        logging.debug('Start generating random problem ...')
-
-        rand_int = np.random.randint
-
-        if seed is not None:
-            np.random.seed(seed)
-
-        # generate a probability distribution
-        prob = np.random.random((self.n_scenarios,)) + 0.001
-        # prob = np.random.standard_normal((self.n_scenarios,)) + 0.001
-        prob = prob / np.sum(prob)
-
-        # generate coefficients of the master problem
-        c = self.c_range * np.random.random((self.master_dim,1))
-        # q = self.c_range * (np.random.random((self.sub_dim,1)) + 0.001)
-        q = np.random.random((self.sub_dim,1)) + 0.1
-        # q = q * (np.array(range(self.sub_dim))[:, None] + 1)
-
-        # Generate a complete recourse matrix
-        # Generate a set of basis for space with dimension
-        # (self.n_constrs + 1)
-        tmp_basis = np.random.random((self.n_constrs+1, self.n_constrs+1))
-        # calculate its center
-        tmp_center = np.sum(tmp_basis, axis=1)
-        unit_center = (tmp_center / np.linalg.norm(tmp_center))[:, None]
-        # project this set of tmp_basis to the orthocomplement
-        # subspace of tmp_center
-        projected_basis = (np.eye(self.n_constrs+1) -
-                           unit_center.dot(unit_center.T)).dot(tmp_basis)
-
-        print 'rank of matrix is:', np.linalg.matrix_rank(projected_basis)
-
-        # projected_basis, _ = np.linalg.qr(projected_basis)
-        subspace_basis, S, _ = np.linalg.svd(projected_basis, full_matrices=False)
-        print 'Singular values are:\n', S
-        # select first n-1 columns of projected_basis
-        subspace_basis = subspace_basis[:, :-1]
-        W = subspace_basis.T.dot(projected_basis)
-        # print 'W is:', W
-
-        if self.flags['degen']:
-            # generate degenerate recourse matrix W
-            W = np.append(W, W.dot(
-                2 * np.random.random((self.n_constrs+1,
-                                      self.sub_dim-self.n_constrs-1)) - 0.5), axis=1)
-        else:
-            # just randomly generate the rest of W
-            W = np.append(W, 2 * np.random.random(
-                (self.n_constrs, self.sub_dim-self.n_constrs-1)) - 0.5, axis=1)
-
-        print 'Shape of W is:', W.shape
-
-        W = W / np.linalg.norm(W, axis=0)
-
-        H = rand_int(1, self.c_range) * 2 * (np.random.random(
-            (self.n_constrs, self.n_scenarios)) - 0.5)
-
-        H = H * (np.array(range(self.n_scenarios))[::-1] + 1) * 0.01
-
-        T = rand_int(1, self.c_range) * 2 * (np.random.random(
-            (self.n_constrs, self.master_dim)) - 0.5)
-
-        # collect randomly generated data
-        prob_data = {'c': np.around(c, decimals=4),
-                     'p': np.around(prob, decimals=5),
-                     'q': np.around(q, decimals=4),
-                     'W': np.around(W, decimals=4),
-                     'H': np.around(H, decimals=4),
-                     'T': np.around(T, decimals=4)}
-
-        logging.debug('Random problem is generated.')
-
-        return prob_data
-
     def _gen_noncomplete(self, seed=None):
 
         '''
@@ -193,52 +92,49 @@ class Two_Stage_Generator(object):
 
         return prob_data
 
+    def _gen(self, seed=None):
+        '''
+        Description: Generate complete two-stage problem
+        '''
 
+        logging.debug('Start generating random problem ...')
 
+        # random integer generator
+        rand_int = np.random.randint
 
-    # def _gen_complete1(self, seed=None):
-    #     '''
-    #     Description: Generate complete two-stage problem
-    #     '''
+        # set random seeds
+        if seed is not None:
+            np.random.seed(seed)
 
-    #     logging.debug('Start generating random problem ...')
+        # generate a probability distribution
+        prob = np.random.random((self.n_scenarios,)) + 0.001
+        prob = prob / np.sum(prob)
 
-    #     # random integer generator
-    #     rand_int = np.random.randint
+        # generate coefficients of the master problem
+        c = np.random.random((self.master_dim,1))
+        q = self.c_range * (np.random.random((self.sub_dim,1)) + 0.001)
+        W = np.random.random((self.n_constrs, self.sub_dim))
+        tmp = np.array(range(2 ** self.n_constrs))
+        weights = self._dec2binlist(tmp, self.n_constrs)
+        weights[weights == 0] = -1
+        W[:, :(2 ** self.n_constrs)] = W[:, :(2 ** self.n_constrs)] *\
+                                       (weights.T)
+        # W = W / np.linalg.norm(W, axis=0)
 
-    #     # set random seeds
-    #     if seed is not None:
-    #         np.random.seed(seed)
+        H = rand_int(1, self.c_range) * (np.random.random((self.n_constrs, self.n_scenarios)) - 0.5)
+        T = rand_int(1, self.c_range) * (np.random.random((self.n_constrs, self.master_dim)) - 0.5)
 
-    #     # generate a probability distribution
-    #     prob = np.random.random((self.n_scenarios,)) + 0.001
-    #     prob = prob / np.sum(prob)
+        # collect randomly generated data
+        prob_data = {'c': np.around(c, decimals=1),
+                     'p': np.around(prob, decimals=3),
+                     'q': np.around(q, decimals=1),
+                     'W': np.around(W, decimals=1),
+                     'H': np.around(H, decimals=1),
+                     'T': np.around(T, decimals=1)}
 
-    #     # generate coefficients of the master problem
-    #     c = np.random.random((self.master_dim,1))
-    #     q = self.c_range * (np.random.random((self.sub_dim,1)) + 0.001)
-    #     W = np.random.random((self.n_constrs, self.sub_dim))
-    #     tmp = np.array(range(2 ** self.n_constrs))
-    #     weights = self._dec2binlist(tmp, self.n_constrs)
-    #     weights[weights == 0] = -1
-    #     W[:, :(2 ** self.n_constrs)] = W[:, :(2 ** self.n_constrs)] *\
-    #                                    (weights.T)
-    #     # W = W / np.linalg.norm(W, axis=0)
+        logging.debug('Random problem is generated.')
 
-    #     H = rand_int(1, self.c_range) * (np.random.random((self.n_constrs, self.n_scenarios)) - 0.5)
-    #     T = rand_int(1, self.c_range) * (np.random.random((self.n_constrs, self.master_dim)) - 0.5)
-
-    #     # collect randomly generated data
-    #     prob_data = {'c': np.around(c, decimals=1),
-    #                  'p': np.around(prob, decimals=3),
-    #                  'q': np.around(q, decimals=1),
-    #                  'W': np.around(W, decimals=1),
-    #                  'H': np.around(H, decimals=1),
-    #                  'T': np.around(T, decimals=1)}
-
-    #     logging.debug('Random problem is generated.')
-
-    #     return prob_data
+        return prob_data
 
     def _solve(self, data):
         '''
